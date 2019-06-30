@@ -10,7 +10,10 @@ namespace CSVLang
 		And,
 		Or,
 		Not,
-		Atom
+		Atom,
+		Print,
+		Set,
+		DoNothing
 	};
 
 	public class Expression
@@ -61,8 +64,8 @@ namespace CSVLang
 
 						}
 					}
-					Console.WriteLine("field name: {0}\nfield value: {1}\nrelation: {2}\ncast as: {3}", fieldName, fieldValue, aRelation, castAs);
-			Console.WriteLine("=================================");
+			//		Console.WriteLine("field name: {0}\nfield value: {1}\nrelation: {2}\ncast as: {3}", fieldName, fieldValue, aRelation, castAs);
+			//Console.WriteLine("=================================");
 					break;
 				case '(':
 					BinaryExprReader.State r = BinaryExprReader.State.Start;
@@ -103,8 +106,8 @@ namespace CSVLang
 								throw new Exception(string.Format("Invalid syntax: {0}", toParse));
 						}
 					}
-					Console.WriteLine("expression1: {0}\noperator: {1}\nexpression2: {2}", expr1, op, expr2);
-			Console.WriteLine("=================================");
+					//Console.WriteLine("expression1: {0}\noperator: {1}\nexpression2: {2}", expr1, op, expr2);
+			//Console.WriteLine("=================================");
 					subExprs[0] = new Expression(expr1);
 					subExprs[1] = new Expression(expr2);
 					break;
@@ -130,8 +133,8 @@ namespace CSVLang
 								throw new Exception(string.Format("Invalid syntax: {0}", toParse));
 						}
 					}
-					Console.WriteLine("expression: {0}",expr);
-			Console.WriteLine("=================================");
+					//Console.WriteLine("expression: {0}",expr);
+			//Console.WriteLine("=================================");
 			subExprs[0] = new Expression(expr);
 					break;
 			}
@@ -423,22 +426,181 @@ namespace CSVLang
 		}
 	}
 
+	public class ActionExpression
+	{
+		private ExpressionType type;
+		private ActionExpression next;
+
+		private string fieldName, fieldValue;
+
+		public ActionExpression(string toParse)
+		{
+			//ActionExpression(toParse, 0);
+		}
+
+		public ActionExpression(string toParse, int index)
+		{
+			type = ExpressionType.DoNothing;
+			next = null;
+			ActionsReader.State s = ActionsReader.State.Start;
+			StringBuilder sb = new StringBuilder();
+			for (int i=index;i<toParse.Length;i++)
+			{
+				s = ActionsReader.NextState(s, toParse[i]);
+				switch(s)
+				{
+					case ActionsReader.State.ReadPrint:
+						type = ExpressionType.Print;
+						next = new ActionExpression(toParse, i + 1);
+						goto loopEnd;
+					case ActionsReader.State.ReadSet:
+						type = ExpressionType.Set;
+						break;
+					case ActionsReader.State.ReadingFieldName:
+					case ActionsReader.State.ReadingFieldValue:
+						sb.Append(toParse[i]);
+						break;
+					case ActionsReader.State.ReadFieldName:
+						fieldName = sb.ToString();
+						sb = new StringBuilder();
+						break;
+					case ActionsReader.State.ReadFieldValue:
+						fieldValue = sb.ToString();
+						next = new ActionExpression(toParse, i + 1);
+						goto loopEnd;
+				}
+			}
+loopEnd:;
+			//Console.WriteLine(s);
+		}
+
+		public void Act(CSVRow row)
+		{
+			switch(type)
+			{
+				case ExpressionType.Print:
+					Console.WriteLine(row);
+					break;
+				case ExpressionType.Set:
+					row.SetEntry(fieldName, fieldValue);
+					break;
+			}
+			if (next != null)
+				next.Act(row);
+		}
+	}
+
+	internal class ActionsReader
+	{
+		public enum State
+		{
+			Start,
+			ReadingPrint,
+			ReadPrint,
+			ReadSet,
+			ReadingFieldName,
+			ReadFieldName,
+			ReadingFieldValue,
+			ReadFieldValue,
+			InvalidSyntax
+		};
+
+		public static State NextState(State s, char c)
+		{
+			State next = State.InvalidSyntax;
+			switch(s)
+			{
+				case State.Start:
+				case State.ReadPrint:
+				case State.ReadFieldValue:
+					switch (c)
+					{
+						case 'p':
+							next = State.ReadingPrint;
+							break;
+						case 's':
+							next = State.ReadSet;
+							break;
+						default:
+							next = State.Start;
+							break;
+					}
+					break;
+				case State.ReadingPrint:
+					switch (c)
+					{
+						case ';':
+							next = State.ReadPrint;
+							break;
+						default:
+							next = State.InvalidSyntax;
+							break;
+					}
+					break;
+				case State.ReadSet:
+					switch (c)
+					{
+						case ' ':
+							next = State.ReadSet;
+							break;
+						case '=':
+							next = State.ReadFieldName;
+							break;
+						default:
+							next = State.ReadingFieldName;
+							break;
+					}
+					break;
+				case State.ReadingFieldName:
+					switch (c)
+					{
+						case '=':
+							next = State.ReadFieldName;
+							break;
+						default:
+							next = State.ReadingFieldName;
+							break;
+					}
+					break;
+				case State.ReadFieldName:
+				case State.ReadingFieldValue:
+					switch (c)
+					{
+						case ';':
+							next = State.ReadFieldValue;
+							break;
+						default:
+							next = State.ReadingFieldValue;
+							break;
+					}
+					break;
+				default:
+					next = State.InvalidSyntax;
+					break;
+			}
+			return next;
+		}
+	}
+
 	public class Test
 	{
 		public static void Main(string[] args)
 		{	
 			Expression e;
 			CSVData csv;
+			ActionExpression ae;
 			try
 			{
 				using (StreamReader sr = new StreamReader(args[0]))
 					e = new Expression(sr.ReadToEnd().Trim());
+				using (StreamReader sr = new StreamReader(args[1]))
+					ae = new ActionExpression(sr.ReadToEnd().Trim(), 0);
 				csv = (new CSVReader()).ReadAll(Console.In);
 				Console.WriteLine(csv.Header);
 				foreach (CSVRow row in csv)
 				{
 					if (e.Eval(row))
-						Console.WriteLine(row);
+						ae.Act(row);
 				}
 			}
 			catch (Exception ex)
