@@ -630,19 +630,24 @@ loopEnd:;
 		{	
 			Expression e;
 			CSVData csv;
-			ActionExpression ae;
+			ActionExpression trueAction;
+			ActionExpression falseAction;
 			try
 			{
 				using (StreamReader sr = new StreamReader(args[0]))
 					e = new Expression(sr.ReadToEnd().Trim());
 				using (StreamReader sr = new StreamReader(args[1]))
-					ae = new ActionExpression(sr.ReadToEnd().Trim(), 0);
+					trueAction = new ActionExpression(sr.ReadToEnd().Trim(), 0);
+				using (StreamReader sr = new StreamReader(args[2]))
+					falseAction = new ActionExpression(sr.ReadToEnd().Trim(), 0);
 				csv = (new CSVReader()).ReadAll(Console.In);
 				Console.WriteLine(csv.Header);
 				foreach (CSVRow row in csv)
 				{
 					if (e.Eval(row))
-						ae.Act(row);
+						trueAction.Act(row);
+					else
+						falseAction.Act(row);
 				}
 			}
 			catch (Exception ex)
