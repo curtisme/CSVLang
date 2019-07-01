@@ -145,7 +145,8 @@ namespace CSVLang
 			switch (type)
 			{
 				case ExpressionType.Atom:
-					return row.GetEntry(fieldName).Equals(fieldValue);
+					//return row.GetEntry(fieldName).Equals(fieldValue);
+					return EvalAsAtom(row);
 				case ExpressionType.And:
 					return subExprs[0].Eval(row) && subExprs[1].Eval(row);
 				case ExpressionType.Or:
@@ -155,6 +156,47 @@ namespace CSVLang
 				default:
 					return true;
 			}
+		}
+
+		private bool EvalAsAtom(CSVRow row)
+		{
+			switch (castAs)
+			{
+				default:
+					switch (aRelation)
+					{
+						case '=':
+							return row.GetEntry(fieldName).Equals(fieldValue);
+						case '<':
+							return row.GetEntry(fieldName).CompareTo(fieldValue) < 0;
+						case '>':
+							return row.GetEntry(fieldName).CompareTo(fieldValue) > 0;
+						default:
+							return false;
+					}
+				case 'd':
+					DateTime d1, d2;
+					if (!DateTime.TryParse(GetFinalDateIfEmpty(row.GetEntry(fieldName)), out d1))
+						throw new Exception(string.Format("Unable to parse {0} as date!", row.GetEntry(fieldName)));
+					if (!DateTime.TryParse(GetFinalDateIfEmpty(fieldValue), out d2))
+						throw new Exception(string.Format("Unable to parse {0} as date!", fieldValue));
+					switch (aRelation)
+					{
+						case '=':
+							return d1 == d2;
+						case '<':
+							return d1 < d2;
+						case '>':
+							return d1 > d2;
+						default:
+							return false;
+					}
+			}
+
+		}
+		private string GetFinalDateIfEmpty(string s)
+		{
+			return string.IsNullOrWhiteSpace(s) ? "31/12/2999" : s;
 		}
 	}
 
