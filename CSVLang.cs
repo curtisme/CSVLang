@@ -624,11 +624,251 @@ loopEnd:;
 		}
 	}
 
+	public class Program
+	{
+		private Expression query;
+		private ActionExpression trueAction;
+		private ActionExpression falseAction;
+
+		public Program(string programSource)
+		{
+			string queryString="",tAction="",fAction="";
+			ProgramReader.State s = ProgramReader.State.Start;
+			StringBuilder sb = null;
+			foreach (char c in programSource)
+			{
+				s = ProgramReader.NextState(s, c);
+				switch (s)
+				{
+					case ProgramReader.State.StartQueryRead:
+					case ProgramReader.State.StartTActionRead:
+					case ProgramReader.State.StartFActionRead:
+						sb = new StringBuilder();
+						break;
+					case ProgramReader.State.ReadingQuery:
+					case ProgramReader.State.ReadingTAction:
+					case ProgramReader.State.ReadingFAction:
+						sb.Append(c);
+						break;
+					case ProgramReader.State.ReadQuery:
+						queryString = sb.ToString();
+						break;
+					case ProgramReader.State.ReadTAction:
+						tAction = sb.ToString();
+						break;
+					case ProgramReader.State.ReadFAction:
+						fAction = sb.ToString();
+						break;
+					case ProgramReader.State.InvalidSyntax:
+						throw new Exception("Invalid Syntax!");
+				}
+			}
+			query = new Expression(queryString.Trim());
+			trueAction = new ActionExpression(tAction.Trim(), 0);
+			falseAction = new ActionExpression(fAction.Trim(), 0);
+		}
+
+		public void Execute(CSVRow row)
+		{
+			if (query.Eval(row))
+				trueAction.Act(row);
+			else
+				falseAction.Act(row);
+		}
+	}
+
+	internal class ProgramReader
+	{
+		public enum State
+		{
+			Start,
+			ReadQ,
+			StartQueryRead,
+			ReadingQuery,
+			ReadQuery,
+			ReadyForT,
+			ReadT,
+			StartTActionRead,
+			ReadingTAction,
+			ReadTAction,
+			ReadyForF,
+			ReadF,
+			StartFActionRead,
+			ReadingFAction,
+			ReadFAction,
+			InvalidSyntax
+		};
+
+		public static State NextState(State s, char c)
+		{
+			State next = State.InvalidSyntax;
+
+			switch(s)
+			{
+				case State.Start:
+					switch(c)
+					{
+						case ' ':
+						case '\t':
+						case '\r':
+						case '\n':
+							next = State.Start;
+							break;
+						case 'q':
+							next = State.ReadQ;
+							break;
+						default:
+							next = State.InvalidSyntax;
+							break;
+					}
+					break;
+				case State.ReadQ:
+					switch(c)
+					{
+						case ' ':
+						case '\t':
+						case '\r':
+						case '\n':
+							next = State.ReadQ;
+							break;
+						case '{':
+							next = State.StartQueryRead;
+							break;
+						default:
+							next = State.InvalidSyntax;
+							break;
+					}
+					break;
+				case State.StartQueryRead:
+				case State.ReadingQuery:
+					switch(c)
+					{
+						case '}':
+							next = State.ReadQuery;
+							break;
+						default:
+							next = State.ReadingQuery;
+							break;
+					}
+					break;
+				case State.ReadQuery:
+				case State.ReadyForT:
+					switch(c)
+					{
+						case ' ':
+						case '\t':
+						case '\r':
+						case '\n':
+							next = State.ReadyForT;
+							break;
+						case 't':
+							next = State.ReadT;
+							break;
+						default:
+							next = State.InvalidSyntax;
+							break;
+					}
+					break;
+				case State.ReadT:
+					switch(c)
+					{
+						case ' ':
+						case '\t':
+						case '\r':
+						case '\n':
+							next = State.ReadT;
+							break;
+						case '{':
+							next = State.StartTActionRead;
+							break;
+						default:
+							next = State.InvalidSyntax;
+							break;
+					}
+					break;
+				case State.StartTActionRead:
+				case State.ReadingTAction:
+					switch(c)
+					{
+						case '}':
+							next = State.ReadTAction;
+							break;
+						default:
+							next = State.ReadingTAction;
+							break;
+					}
+					break;
+				case State.ReadTAction:
+				case State.ReadyForF:
+					switch(c)
+					{
+						case ' ':
+						case '\t':
+						case '\r':
+						case '\n':
+							next = State.ReadyForF;
+							break;
+						case 'f':
+							next = State.ReadF;
+							break;
+						default:
+							next = State.InvalidSyntax;
+							break;
+					}
+					break;
+				case State.ReadF:
+					switch(c)
+					{
+						case ' ':
+						case '\t':
+						case '\r':
+						case '\n':
+							next = State.ReadF;
+							break;
+						case '{':
+							next = State.StartFActionRead;
+							break;
+						default:
+							next = State.InvalidSyntax;
+							break;
+					}
+					break;
+				case State.StartFActionRead:
+				case State.ReadingFAction:
+					switch(c)
+					{
+						case '}':
+							next = State.ReadFAction;
+							break;
+						default:
+							next = State.ReadingFAction;
+							break;
+					}
+					break;
+				case State.ReadFAction:
+					switch(c)
+					{
+						case ' ':
+						case '\t':
+						case '\r':
+						case '\n':
+							next = State.ReadFAction;
+							break;
+						default:
+							next = State.InvalidSyntax;
+							break;
+					}
+					break;
+			}
+			return next;
+		}
+	}
+
 	public class Test
 	{
 		public static void Main(string[] args)
 		{	
-			Expression e;
+			/*Expression e;
 			CSVData csv;
 			ActionExpression trueAction;
 			ActionExpression falseAction;
@@ -649,6 +889,21 @@ loopEnd:;
 					else
 						falseAction.Act(row);
 				}
+			}
+			catch (Exception ex)
+			{
+				Console.Error.WriteLine(ex);
+			}*/
+			Program p;
+			CSVData csv;
+			try
+			{
+				using (StreamReader sr = new StreamReader(args[0]))
+					p = new Program(sr.ReadToEnd());
+				csv = (new CSVReader()).ReadAll(Console.In);
+				Console.WriteLine(csv.Header);
+				foreach (CSVRow row in csv)
+					p.Execute(row);
 			}
 			catch (Exception ex)
 			{
