@@ -35,7 +35,7 @@ we would save this to a file 'source' and run
 CSVLang.exe source < test.csv
 ```
 
-whic outputs
+which outputs
 ```
 col1,col2,col with spaces
 abc,def,12/09/1889
