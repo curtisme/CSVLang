@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Collections.Generic;
 using CSVUtils;
 
 namespace CSVLang
@@ -13,6 +14,7 @@ namespace CSVLang
         Atom,
         Print,
         Set,
+        Let,
         DoNothing
     };
 
@@ -64,8 +66,6 @@ namespace CSVLang
 
                         }
                     }
-            //        Console.WriteLine("field name: {0}\nfield value: {1}\nrelation: {2}\ncast as: {3}", fieldName, fieldValue, aRelation, castAs);
-            //Console.WriteLine("=================================");
                     break;
                 case '(':
                     BinaryExprReader.State r = BinaryExprReader.State.Start;
@@ -106,8 +106,6 @@ namespace CSVLang
                                 throw new Exception(string.Format("Invalid syntax: {0}", toParse));
                         }
                     }
-                    //Console.WriteLine("expression1: {0}\noperator: {1}\nexpression2: {2}", expr1, op, expr2);
-            //Console.WriteLine("=================================");
                     subExprs[0] = new Expression(expr1);
                     subExprs[1] = new Expression(expr2);
                     break;
@@ -133,8 +131,6 @@ namespace CSVLang
                                 throw new Exception(string.Format("Invalid syntax: {0}", toParse));
                         }
                     }
-                    //Console.WriteLine("expression: {0}",expr);
-            //Console.WriteLine("=================================");
             subExprs[0] = new Expression(expr);
                     break;
             }
@@ -145,7 +141,6 @@ namespace CSVLang
             switch (type)
             {
                 case ExpressionType.Atom:
-                    //return row.GetEntry(fieldName).Equals(fieldValue);
                     return EvalAsAtom(row);
                 case ExpressionType.And:
                     return subExprs[0].Eval(row) && subExprs[1].Eval(row);
@@ -171,15 +166,21 @@ namespace CSVLang
                             return row.GetEntry(fieldName).CompareTo(fieldValue) < 0;
                         case '>':
                             return row.GetEntry(fieldName).CompareTo(fieldValue) > 0;
+                        case '#':
+                            return row.GetEntry(fieldName).StartsWith(fieldValue);
                         default:
                             return false;
                     }
                 case 'd':
                     DateTime d1, d2;
                     if (!DateTime.TryParse(GetFinalDateIfEmpty(row.GetEntry(fieldName)), out d1))
-                        throw new Exception(string.Format("Unable to parse {0} as date!", row.GetEntry(fieldName)));
+                        throw new Exception(string.Format(
+                                    "Unable to parse {0} as date!",
+                                    row.GetEntry(fieldName)));
                     if (!DateTime.TryParse(GetFinalDateIfEmpty(fieldValue), out d2))
-                        throw new Exception(string.Format("Unable to parse {0} as date!", fieldValue));
+                        throw new Exception(string.Format(
+                                    "Unable to parse {0} as date!",
+                                    fieldValue));
                     switch (aRelation)
                     {
                         case '=':
@@ -231,6 +232,7 @@ namespace CSVLang
                         case '=':
                         case '<':
                         case '>':
+                        case '#':
                             next = State.ReadRelation;
                             break;
                         default:
@@ -498,25 +500,31 @@ namespace CSVLang
                     case ActionsReader.State.ReadSet:
                         type = ExpressionType.Set;
                         break;
+                    case ActionsReader.State.ReadLet:
+                        type = ExpressionType.Let;
+                        break;
                     case ActionsReader.State.ReadingFieldName:
                     case ActionsReader.State.ReadingFieldValue:
+                    case ActionsReader.State.ReadingVarName:
+                    case ActionsReader.State.ReadingVarValue:
                         sb.Append(toParse[i]);
                         break;
                     case ActionsReader.State.ReadFieldName:
+                    case ActionsReader.State.ReadVarName:
                         fieldName = sb.ToString();
                         sb = new StringBuilder();
                         break;
                     case ActionsReader.State.ReadFieldValue:
+                    case ActionsReader.State.ReadVarValue:
                         fieldValue = sb.ToString();
                         next = new ActionExpression(toParse, i + 1);
                         goto loopEnd;
                 }
             }
-loopEnd:;
-            //Console.WriteLine(s);
+            loopEnd:;
         }
 
-        public void Act(CSVRow row)
+        public void Act(CSVRow row, Dictionary<string, string> vars)
         {
             switch(type)
             {
@@ -524,11 +532,24 @@ loopEnd:;
                     Console.WriteLine(row);
                     break;
                 case ExpressionType.Set:
-                    row.SetEntry(fieldName, fieldValue);
+                    if (fieldValue.Length >  0
+                            && fieldValue[0] == '$'
+                            && vars.ContainsKey(fieldValue.Substring(1)))
+                        row.SetEntry(fieldName, vars[fieldValue.Substring(1)]);
+                    else
+                        row.SetEntry(fieldName, fieldValue);
+                    break;
+                case ExpressionType.Let:
+                    if (!vars.ContainsKey(fieldName))
+                        vars.Add(fieldName, "");
+                    if (row.Contains(fieldValue))
+                        vars[fieldName] = row.GetEntry(fieldValue);
+                    else
+                        vars[fieldName] = fieldValue;
                     break;
             }
             if (next != null)
-                next.Act(row);
+                next.Act(row, vars);
         }
     }
 
@@ -544,6 +565,11 @@ loopEnd:;
             ReadFieldName,
             ReadingFieldValue,
             ReadFieldValue,
+            ReadLet,
+            ReadingVarName,
+            ReadVarName,
+            ReadingVarValue,
+            ReadVarValue,
             InvalidSyntax
         };
 
@@ -562,6 +588,9 @@ loopEnd:;
                             break;
                         case 's':
                             next = State.ReadSet;
+                            break;
+                        case 'l':
+                            next = State.ReadLet;
                             break;
                         default:
                             next = State.Start;
@@ -613,6 +642,43 @@ loopEnd:;
                             break;
                         default:
                             next = State.ReadingFieldValue;
+                            break;
+                    }
+                    break;
+                case State.ReadLet:
+                    switch (c)
+                    {
+                        case ' ':
+                            next = State.ReadLet;
+                            break;
+                        case '=':
+                            next = State.ReadVarName;
+                            break;
+                        default:
+                            next = State.ReadingVarName;
+                            break;
+                    }
+                    break;
+                case State.ReadingVarName:
+                    switch (c)
+                    {
+                        case '=':
+                            next = State.ReadVarName;
+                            break;
+                        default:
+                            next = State.ReadingVarName;
+                            break;
+                    }
+                    break;
+                case State.ReadVarName:
+                case State.ReadingVarValue:
+                    switch (c)
+                    {
+                        case ';':
+                            next = State.ReadVarValue;
+                            break;
+                        default:
+                            next = State.ReadingVarValue;
                             break;
                     }
                     break;
@@ -670,10 +736,11 @@ loopEnd:;
 
         public void Execute(CSVRow row)
         {
+            Dictionary<string, string> vars = new Dictionary<string, string>();
             if (query.Eval(row))
-                trueAction.Act(row);
+                trueAction.Act(row, vars);
             else
-                falseAction.Act(row);
+                falseAction.Act(row, vars);
         }
     }
 
@@ -864,36 +931,10 @@ loopEnd:;
         }
     }
 
-    public class Test
+    public class CSVLang
     {
         public static void Main(string[] args)
         {    
-            /*Expression e;
-            CSVData csv;
-            ActionExpression trueAction;
-            ActionExpression falseAction;
-            try
-            {
-                using (StreamReader sr = new StreamReader(args[0]))
-                    e = new Expression(sr.ReadToEnd().Trim());
-                using (StreamReader sr = new StreamReader(args[1]))
-                    trueAction = new ActionExpression(sr.ReadToEnd().Trim(), 0);
-                using (StreamReader sr = new StreamReader(args[2]))
-                    falseAction = new ActionExpression(sr.ReadToEnd().Trim(), 0);
-                csv = (new CSVReader()).ReadAll(Console.In);
-                Console.WriteLine(csv.Header);
-                foreach (CSVRow row in csv)
-                {
-                    if (e.Eval(row))
-                        trueAction.Act(row);
-                    else
-                        falseAction.Act(row);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine(ex);
-            }*/
             Program p;
             CSVData csv;
             try
